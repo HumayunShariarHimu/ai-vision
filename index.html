@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Vision for Blind (Switching Front & Back Camera with Flashlight)</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+        }
+        #video {
+            width: 80%;
+            height: auto;
+            margin-bottom: 10px;
+        }
+        #startButton, #switchButton, #flashButton {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        #startButton:hover, #switchButton:hover, #flashButton:hover {
+            background-color: #45a049;
+        }
+        #result {
+            margin-top: 20px;
+            font-size: 20px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>AI Vision for Blind (Switching Front & Back Camera with Flashlight)</h1>
+    <video id="video" autoplay></video>
+    <button id="startButton">Start Camera</button>
+    <button id="switchButton" style="display:none;">Switch Camera</button>
+    <button id="flashButton" style="display:none;">Toggle Flashlight</button>
+    <p id="result">Waiting for the camera feed...</p>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+    <script>
+        const videoElement = document.getElementById('video');
+        const resultElement = document.getElementById('result');
+        const startButton = document.getElementById('startButton');
+        const switchButton = document.getElementById('switchButton');
+        const flashButton = document.getElementById('flashButton');
+        let model;
+        let currentStream;
+        let currentFacingMode = 'environment'; // Default to back camera (environment)
+        let flashlightOn = false;  // Track flashlight state
+
+        // Load the pre-trained COCO-SSD model from TensorFlow.js
+        async function loadModel() {
+            model = await cocoSsd.load();
+            console.log("Model Loaded!");
+        }
+
+        // Start video stream when the button is clicked
+        startButton.addEventListener('click', async () => {
+            await startCamera();
+            await loadModel();
+            analyzeFrame();  // Start analyzing frames after camera is loaded
+        });
+
+        // Switch between front and back camera
+        switchButton.addEventListener('click', async () => {
+            currentFacingMode = (currentFacingMode === 'environment') ? 'user' : 'environment'; // Toggle between 'user' (front) and 'environment' (back)
+            await startCamera(); // Restart the camera with the new facing mode
+        });
+
+        // Toggle flashlight state
+        flashButton.addEventListener('click', async () => {
+            flashlightOn = !flashlightOn;
+            toggleFlashlight(flashlightOn); // Toggle flashlight
+        });
+
+        // Start camera with specified facing mode
+        async function startCamera() {
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => track.stop()); // Stop any existing stream
+            }
+
+            const constraints = {
+                video: {
+                    facingMode: { exact: currentFacingMode }, // Use the selected camera (front or back)
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                }
+            };
+
+            currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+            videoElement.srcObject = currentStream;
+            switchButton.style.display = 'inline-block'; // Show switch button after camera starts
+            flashButton.style.display = 'inline-block'; // Show flashlight button after camera starts
+
+            resultElement.innerText = `Using ${currentFacingMode === 'environment' ? 'Back' : 'Front'} Camera`;
+        }
+
+        // Analyze each frame from the video stream
+        async function analyzeFrame() {
+            if (model) {
+                const predictions = await model.detect(videoElement);
+                if (predictions.length > 0) {
+                    const description = predictions.map(p => `${p.class} (${Math.round(p.score * 100)}%)`).join(', ');
+                    resultElement.innerText = `Objects detected: ${description}`;
+                    speak(description);
+                } else {
+                    resultElement.innerText = "No objects detected";
+                    speak("No objects detected");
+                }
+            }
+            requestAnimationFrame(analyzeFrame);  // Keep analyzing the frames
+        }
+
+        // Speak the result aloud using Text-to-Speech API
+        function speak(text) {
+            const speech = new SpeechSynthesisUtterance(text);
+            window.speechSynthesis.speak(speech);
+        }
+
+        // Toggle flashlight on/off based on flashlight state
+        async function toggleFlashlight(state) {
+            if (currentFacingMode === 'environment' && 'mediaDevices' in navigator) {
+                const track = currentStream.getVideoTracks()[0];
+                const capabilities = track.getCapabilities();
+                if (capabilities.torch) {
+                    try {
+                        await track.applyConstraints({ advanced: [{ torch: state }] });
+                        resultElement.innerText = state ? "Flashlight On" : "Flashlight Off";
+                    } catch (error) {
+                        console.log("Flashlight control failed:", error);
+                        resultElement.innerText = "Flashlight control failed";
+                    }
+                } else {
+                    resultElement.innerText = "Flashlight not supported";
+                }
+            }
+        }
+    </script>
+</body>
+</html>
